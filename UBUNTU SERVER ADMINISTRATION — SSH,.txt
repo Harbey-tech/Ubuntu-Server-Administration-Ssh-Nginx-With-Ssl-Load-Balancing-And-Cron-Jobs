@@ -1,0 +1,261 @@
+UBUNTU SERVER ADMINISTRATION — SSH, NGINX (WITH SSL), LOAD BALANCING, AND CRON JOBS
+
+  Overview
+
+This documentation walks through essential Ubuntu server administration tasks, including:
+
+Configuring secure SSH access
+
+Installing and hardening Nginx with HTTPS
+
+Setting up load balancing
+
+Automating tasks with Cron
+
+
+SECTION 1 — Secure SSH Configuration
+
+Step 1: Ensure SSH Is Installed and Running
+
+The OpenSSH Server allows you to securely connect to your Ubuntu machine remotely.
+
+sudo apt update
+sudo apt install openssh-server -y
+sudo systemctl enable ssh
+sudo systemctl start ssh
+sudo systemctl status ssh
+
+
+Check Output:
+You should see active (running) status.
+
+
+
+ Step 2 : Create an SSH Key Pair on Your Client Machine
+
+SSH keys improve security by replacing passwords with cryptographic authentication.
+
+Run 
+
+ssh-keygen -t rsa -b 4096
+
+
+Press Enter to accept defaults, or specify a file path if needed.
+Your keys will be stored in ~/.ssh/id_rsa (private) and ~/.ssh/id_rsa.pub (public).
+
+
+Step 3 : Disable Password Authentication
+
+Disabling password login hardens SSH against brute-force attacks.
+
+Edit the SSH configuration file:
+
+sudo nano /etc/ssh/sshd_config
+
+
+Find and modify (or add if missing):
+
+PasswordAuthentication no
+PermitRootLogin no
+
+
+Save and restart SSH:
+
+sudo systemctl restart ssh
+
+
+
+
+SECTION 2 — Install and Secure Nginx with HTTPS
+
+Step 1: Install Nginx
+
+Update and install:
+
+sudo apt update
+sudo apt install nginx -y
+
+
+Check status:
+
+sudo systemctl status nginx
+
+
+You should see active (running).
+
+Step 2 : Enable SSL/TLS (HTTPS) with a Self-Signed Certificate
+
+Create a directory for SSL certificates:
+
+sudo mkdir /etc/nginx/ssl
+
+
+Generate a self-signed certificate:
+
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+ -keyout /etc/nginx/ssl/selfsigned.key \
+ -out /etc/nginx/ssl/selfsigned.crt
+
+
+When prompted, enter your details 
+
+Step 3: Configure HTTPS in Nginx
+
+Edit the default site configuration:
+
+sudo nano /etc/nginx/sites-available/default
+
+
+Replace its contents with:
+
+server {
+    listen 80;
+    server_name localhost;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name localhost;
+
+    ssl_certificate /etc/nginx/ssl/selfsigned.crt;
+    ssl_certificate_key /etc/nginx/ssl/selfsigned.key;
+
+    root /var/www/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+
+
+Then test and reload:
+
+sudo nginx -t
+sudo systemctl restart nginx
+
+
+Verify:
+
+curl -k https://localhost
+
+
+
+
+Step 4: Harden Nginx Security
+
+Disable Server Tokens
+
+sudo nano /etc/nginx/nginx.conf
+
+
+Add inside the http {} block:
+
+server_tokens off;
+
+Add Security Headers
+
+Inside your SSL server block (/etc/nginx/sites-available/default):
+
+add_header X-Frame-Options "SAMEORIGIN";
+add_header X-Content-Type-Options "nosniff";
+add_header X-XSS-Protection "1; mode=block";
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+Limit Request Size
+client_max_body_size 10M;
+
+Allow Only Strong SSL Protocols
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers HIGH:!aNULL:!MD5;
+
+
+Test and reload:
+
+sudo nginx -t
+sudo systemctl reload nginx
+
+
+
+
+SECTION 3 — Configure Nginx as a Load Balancer
+
+Load balancing distributes traffic across multiple backend servers for better performance and reliability.
+
+Step 1: Create Load Balancer Configuration
+sudo mkdir -p /etc/nginx/conf.d
+sudo nano /etc/nginx/conf.d/loadbalancer.conf
+
+
+Add:
+
+upstream backend_servers {
+    server 192.168.1.101;
+    server 192.168.1.102;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://backend_servers;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+
+Then:
+
+sudo nginx -t
+sudo systemctl restart nginx
+
+
+
+SECTION 4 — Automate Tasks with Cron
+
+Cron lets you schedule recurring system tasks such as backups or updates.
+
+Step 1: Verify Cron Service
+
+Check if Cron is installed and running:
+
+sudo systemctl status cron
+
+
+Step 2 :  Create a Backup Script
+nano /home/yourusername/backup.sh
+
+
+Add:
+
+#!/bin/bash
+tar -czf /root/backup_$(date +%Y%m%d).tar.gz /root/Documents
+
+
+Make it executable:
+
+chmod +x /home/yourusername/backup.sh
+
+Step 3: Schedule Cron Jobs
+
+Open your crontab:
+
+crontab -e
+
+
+Add these examples:
+
+Schedule	Command	Description
+0 2 * * * /home/yourusername/backup.sh	Runs daily at 2 AM	Backup your Documents
+0 4 * * 1 apt update -y && apt upgrade -y	Every Monday 4 AM	Auto-update Ubuntu
+0 6 * * * df -h > /root/disk_report.txt	Every day 6 AM	Save disk usage report
+
+Save and exit (Ctrl + O, Enter, Ctrl + X).
+
+Check your cron jobs:
+
+crontab -l
